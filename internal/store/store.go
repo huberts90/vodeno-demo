@@ -1,6 +1,8 @@
 package store
 
-import "context"
+import (
+	"context"
+)
 
 type Message struct {
 	Email     string
@@ -10,10 +12,24 @@ type Message struct {
 }
 
 type MailingJob struct {
-	MailingId int
+	MailingId int `json:"mailing_id"`
+}
+
+type MessageDeleter interface {
+	DeleteMessage(context.Context, int) error
+}
+
+type MailingDeleter interface {
+	DeleteMailing(context.Context, int) error
+}
+
+type Deleter interface {
+	MessageDeleter
+	MailingDeleter
 }
 
 type MessengerStore interface {
-	Insert(context.Context, *Message) error
-	//Order(context.Context, *MailingJob) error
+	InsertMessage(context.Context, *Message) error
+	MessageDeleter
+	OrderMailing(context.Context, *MailingJob) error
 }

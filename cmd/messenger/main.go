@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
+	"sync"
+	"time"
+	"vodeno.com/demo/internal/sender/mock"
 
 	"go.uber.org/zap"
 
@@ -49,8 +53,36 @@ func main() {
 
 	httpSrv := http.NewServer(logger, postgresStore)
 
-	err = httpSrv.Serve(httpPort)
-	if err != nil {
-		log.Fatal("Failed to create HTTP server", zap.Error(err))
-	}
+	// TODO: Graceful shutdown
+	quit := make(chan struct{})
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		err = httpSrv.Serve(httpPort)
+		if err != nil {
+			log.Fatal("Failed to create HTTP server", zap.Error(err))
+		}
+	}()
+
+	// TODO: Make the ticker interval a variable from config
+	ticker := time.NewTicker(10 * time.Second)
+	sender := mock.NewMocker(logger)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-ticker.C:
+				sender.Send(context.TODO(), postgresStore)
+			case <-quit:
+				ticker.Stop()
+				return
+			}
+		}
+
+	}()
+
+	wg.Wait()
+	logger.Info("Messenger stopped")
 }

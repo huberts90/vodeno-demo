@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"vodeno.com/demo/internal/sender"
 	"vodeno.com/demo/internal/store"
 )
 
@@ -17,7 +18,8 @@ func NewSQLStore(db *sql.DB) *sqlStore {
 	}
 }
 
-func (s *sqlStore) Insert(ctx context.Context, message *store.Message) error {
+// TODO: SQL injection
+func (s *sqlStore) InsertMessage(ctx context.Context, message *store.Message) error {
 	err := s.createMailingIfNotExists(ctx, message.MailingId)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve a mailing: %w", err)
@@ -33,6 +35,75 @@ func (s *sqlStore) Insert(ctx context.Context, message *store.Message) error {
 	}
 
 	return nil
+}
+
+func (s *sqlStore) DeleteMessage(ctx context.Context, id int) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM MESSAGES WHERE ID=$1", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete message: %w", err)
+	}
+
+	return nil
+}
+
+func (s *sqlStore) OrderMailing(ctx context.Context, mj *store.MailingJob) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE MAILINGS SET IS_SCHEDULED=TRUE WHERE ID=$1", mj.MailingId)
+	if err != nil {
+
+		return fmt.Errorf("failed to order a mailing: %w", err)
+	}
+
+	return nil
+}
+
+func (s *sqlStore) DeleteMailing(ctx context.Context, id int) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM MAILINGS WHERE ID=$1", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete mailing: %w", err)
+	}
+
+	return nil
+}
+
+func (s *sqlStore) GetScheduledMailing(ctx context.Context) ([]sender.Message, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT MESSAGES.ID, C.EMAIL, TITLE, CONTENT, ML.ID as MAILING_ID "+
+		"FROM MESSAGES JOIN MAILINGS ML on ML.ID = MESSAGES.MAILING_ID JOIN CUSTOMERS C on C.ID = MESSAGES.CUSTOMER_ID "+
+		"WHERE ML.IS_SCHEDULED=TRUE")
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to select scheduled mailing: %w", err)
+	}
+	defer rows.Close()
+
+	// TODO: Get the size of list
+	var msgList []sender.Message
+	for rows.Next() {
+		var id int
+		var email string
+		var title string
+		var content string
+		var mailingId int
+		err = rows.Scan(&id, &email, &title, &content, &mailingId)
+		if err != nil {
+			return nil, fmt.Errorf("failed to retrieve message details: %w", err)
+		}
+		msg := sender.Message{
+			MessageId: id,
+			Email:     email,
+			Title:     title,
+			Content:   content,
+			MailingId: mailingId,
+		}
+		// TODO: Find more efficient way to deal with slice growing
+		msgList = append(msgList, msg)
+	}
+	// get any error encountered during iteration
+	err = rows.Err()
+	if err != nil {
+		return nil, fmt.Errorf("failed to iterate over messages: %w", err)
+	}
+
+	return msgList, err
 }
 
 func (s *sqlStore) createMailingIfNotExists(ctx context.Context, id int) error {
